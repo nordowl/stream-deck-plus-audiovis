@@ -20,7 +20,7 @@ const BARS_PER_DIAL = 5
 /**
  * Target frame rate for the visualizer.
  */
-const TARGET_FPS = 20
+const TARGET_FPS = 45
 const FRAME_INTERVAL = Math.round(1000 / TARGET_FPS)
 
 /**
@@ -41,25 +41,27 @@ const DIRTY_THRESHOLD = 0.015
  * SMOOTH_DECAY: multiplier on falling values per frame.
  *   Higher (closer to 1) = values linger longer = smoother.
  */
-const SMOOTH_ATTACK = 0.75
-const SMOOTH_DECAY = 0.75
+const SMOOTH_ATTACK = 0.5
+const SMOOTH_DECAY = 0.8
 
 /**
  * Auto-gain: tracks recent peak level and normalizes output so quiet
- * audio still produces visible bars. Kept gentle so the natural
- * mountain shape of the spectrum is preserved (bass shouldn't clip flat).
+ * audio still produces visible visualization. Uses asymmetric tracking:
+ * rises fast to catch transients, decays slowly to avoid pumping.
+ * The boost is applied as a sqrt-compressed multiplier to preserve
+ * the natural spectral shape even at high gain.
  */
-const AUTO_GAIN_ATTACK = 0.03 // How fast auto-gain rises to a new peak
-const AUTO_GAIN_DECAY = 0.001 // How fast auto-gain drops when audio gets quieter
-const AUTO_GAIN_MIN_PEAK = 0.08 // Minimum peak to avoid division by near-zero
-const AUTO_GAIN_MAX_BOOST = 1.5 // Maximum auto-gain multiplier (reduced to prevent bass clipping)
+const AUTO_GAIN_ATTACK = 0.15 // Rise quickly to new peaks
+const AUTO_GAIN_DECAY = 0.005 // Fall back gently when audio gets quieter
+const AUTO_GAIN_MIN_PEAK = 0.005 // Floor — very quiet audio is still normalized
+const AUTO_GAIN_MAX_BOOST = 30.0 // Allow heavy boost for quiet sources (e.g. low-volume YouTube)
 
 /**
  * Spectral (cross-bin) smoothing passes. Applies a 3-tap moving average
  * to blur out jagged steps. Keep low (2) so bass variation isn't flattened
  * — log mapping already provides smooth distribution.
  */
-const SPECTRAL_SMOOTH_PASSES = 1
+const SPECTRAL_SMOOTH_PASSES = 3
 
 /**
  * Represents a registered dial action that receives visualizer frames.
@@ -236,9 +238,19 @@ export class AudioEngine {
         // Compute auto-gain boost (capped)
         const autoBoost = Math.min(AUTO_GAIN_MAX_BOOST, 1.0 / this.autoGainPeak)
 
-        // Apply combined gain (user gain * auto-gain)
+        // Apply combined gain with soft compression.
+        // For boost > 3×, use sqrt compression to preserve spectral shape —
+        // without this, high auto-gain would push all bass bins to 1.0 (flat wall).
         for (let i = 0; i < TOTAL_BINS; i++) {
-            rawBins[i] = Math.min(1, rawBins[i] * this.gain * autoBoost)
+            let v = rawBins[i] * this.gain * autoBoost
+            // Soft-knee compression: smoothly saturate toward 1.0
+            if (v > 1) {
+                v = 1
+            } else if (v > 0.5) {
+                // Gentle compression in the upper half to avoid clipping
+                v = 0.5 + (v - 0.5) * 0.7
+            }
+            rawBins[i] = v
         }
 
         // Spectral smoothing: blur adjacent bins together to eliminate

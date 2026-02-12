@@ -22,11 +22,22 @@ const logger = streamDeck.logger.createScope("WasapiSource")
 
 /**
  * Number of FFT bins (must be power of 2).
- * 256 is lightweight. Used for mid/high frequencies (500+ Hz).
- * Bass frequencies use dedicated Goertzel filters instead.
+ * 2048 gives 23.4 Hz/bin resolution at 48kHz — excellent bass detail.
+ * Combined with 50% overlapping windows, latency stays low (~21ms)
+ * while frequency resolution is 8× better than 256.
  */
-const FFT_SIZE = 512
+const FFT_SIZE = 2048
 const HALF_FFT = FFT_SIZE / 2
+
+/**
+ * Hop size for overlapping windows (50% overlap).
+ * FFT is recomputed every HOP_SIZE new samples, using the latest
+ * FFT_SIZE samples as a sliding window. This decouples frequency
+ * resolution from time resolution:
+ *   - Frequency resolution = sampleRate / FFT_SIZE = 23.4 Hz
+ *   - Time resolution = HOP_SIZE / sampleRate = 21.3ms
+ */
+const HOP_SIZE = FFT_SIZE >> 1 // 1024 samples = ~21ms at 48kHz
 
 /**
  * Max frequency to visualize in Hz. Extended to 5kHz to show more of the spectrum
@@ -170,6 +181,7 @@ export class WasapiAudioSource {
     private process: ChildProcess | null = null
     private sampleBuffer = new Float32Array(FFT_SIZE)
     private writePos = 0
+    private hopCount = 0 // samples since last FFT computation
     private magnitudes = new Float32Array(HALF_FFT)
     private running = false
     private exePath: string
@@ -244,31 +256,40 @@ export class WasapiAudioSource {
 
     /**
      * Process incoming raw PCM float32 audio data.
+     * Uses a ring buffer with hop-based triggering for overlapping FFT windows.
+     * The FFT fires every HOP_SIZE new samples, always reading the latest
+     * FFT_SIZE samples — giving high frequency resolution with low latency.
      */
     private processAudioChunk(chunk: Buffer): void {
-        // Read float32 samples from the raw buffer
         const floatCount = Math.floor(chunk.length / 4)
         for (let i = 0; i < floatCount; i++) {
             this.sampleBuffer[this.writePos] = chunk.readFloatLE(i * 4)
             this.writePos = (this.writePos + 1) % FFT_SIZE
-        }
-
-        // When we have enough samples, compute FFT
-        if (this.writePos === 0) {
-            this.computeFFT()
+            this.hopCount++
+            if (this.hopCount >= HOP_SIZE) {
+                this.hopCount = 0
+                this.computeFFT()
+            }
         }
     }
 
     /**
-     * Compute FFT on the current sample buffer and update magnitudes.
+     * Compute FFT on the current ring buffer and update magnitudes.
+     * Reads FFT_SIZE samples starting from writePos (oldest) wrapping around.
      * Also runs Goertzel filters for targeted bass frequencies.
      */
     private computeFFT(): void {
-        // Copy samples into pre-allocated real buffer and apply pre-computed window
-        for (let i = 0; i < FFT_SIZE; i++) {
-            fftReal[i] = this.sampleBuffer[i] * hannCoeffs[i]
-            fftImag[i] = 0
+        const start = this.writePos
+        const firstLen = FFT_SIZE - start
+
+        // Copy from ring buffer with Hann window applied (two segments, no modulo)
+        for (let i = 0; i < firstLen; i++) {
+            fftReal[i] = this.sampleBuffer[start + i] * hannCoeffs[i]
         }
+        for (let i = 0; i < start; i++) {
+            fftReal[firstLen + i] = this.sampleBuffer[i] * hannCoeffs[firstLen + i]
+        }
+        fftImag.fill(0)
 
         // Perform FFT (zero-alloc, pre-computed twiddles)
         fftInPlace()
@@ -278,14 +299,22 @@ export class WasapiAudioSource {
             this.magnitudes[i] = Math.sqrt(fftReal[i] * fftReal[i] + fftImag[i] * fftImag[i]) / HALF_FFT
         }
 
-        // Goertzel filters for bass frequencies — each is O(N), no trig at runtime
+        // Goertzel filters for bass frequencies on unwindowed samples
+        // Read from ring buffer in two segments (same order as FFT)
         for (let f = 0; f < BASS_FREQS.length; f++) {
             const coeff = goertzelCoeffs[f]
             let s0 = 0
             let s1 = 0
             let s2 = 0
 
-            for (let i = 0; i < FFT_SIZE; i++) {
+            // Segment 1: start..FFT_SIZE
+            for (let i = 0; i < firstLen; i++) {
+                s0 = this.sampleBuffer[start + i] + coeff * s1 - s2
+                s2 = s1
+                s1 = s0
+            }
+            // Segment 2: 0..start
+            for (let i = 0; i < start; i++) {
                 s0 = this.sampleBuffer[i] + coeff * s1 - s2
                 s2 = s1
                 s1 = s0
