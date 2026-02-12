@@ -1,0 +1,53 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+	"Name": "Audio Visualizer",
+	"Version": "0.1.0.0",
+	"Author": "nordowl",
+	"Actions": [
+		{
+			"Name": "Audio Visualizer",
+			"UUID": "com.nordowl.audiovis.visualizer",
+			"Icon": "imgs/actions/counter/icon",
+			"Tooltip": "Renders a real-time audio visualizer on the Stream Deck + touch strip. Assign to all 4 dials for a full-width display.",
+			"Controllers": [
+				"Encoder"
+			],
+			"Encoder": {
+				"layout": "layouts/visualizer-layout.json",
+				"TriggerDescription": {
+					"Rotate": "Adjust gain",
+					"Touch": "Change color theme"
+				}
+			},
+			"States": [
+				{
+					"Image": "imgs/actions/counter/key"
+				}
+			]
+		}
+	],
+	"Category": "Audio Visualizer",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"CodePath": "bin/plugin.js",
+	"Description": "Real-time audio visualizer for the Stream Deck + touchscreen. Assign to all 4 dials for a stunning full-width frequency display.",
+	"Icon": "imgs/plugin/marketplace",
+	"SDKVersion": 2,
+	"Software": {
+		"MinimumVersion": "6.7"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "12"
+		},
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "20",
+		"Debug": "enabled"
+	},
+	"UUID": "com.nordowl.audiovis"
+}
