@@ -14,7 +14,7 @@ call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
 
 echo.
 echo Compiling wasapi-capture.exe...
-cl /EHsc /O2 native\wasapi-capture.cpp /Fe:com.nordowl.audiovis.sdPlugin\bin\wasapi-capture.exe /link ole32.lib
+cl /EHsc /O2 native\wasapi-capture.cpp /Fe:com.nordowl.audiovis.sdPlugin\native\wasapi-capture.exe /link ole32.lib
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

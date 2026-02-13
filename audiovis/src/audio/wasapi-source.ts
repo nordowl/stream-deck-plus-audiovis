@@ -188,9 +188,16 @@ export class WasapiAudioSource {
     private _outputBuf: Float32Array | null = null
 
     constructor() {
-        // Look for the companion binary in the plugin's bin directory
+        // Look for the companion binary.
+        // Check multiple locations: native/ dir (dev), then bin/ dir (packaged).
+        // Windows Defender Controlled Folder Access can block writing .exe files
+        // into sdPlugin/bin/, so during development wekeep the binary in native/.
         const pluginDir = resolve(dirname(process.argv[1] ?? "."), "..")
-        this.exePath = resolve(pluginDir, "bin", "wasapi-capture.exe")
+        const candidates = [
+            resolve(pluginDir, "native", "wasapi-capture.exe"),
+            resolve(pluginDir, "bin", "wasapi-capture.exe"),
+        ]
+        this.exePath = candidates.find((p) => existsSync(p)) ?? candidates[0]
     }
 
     /**
